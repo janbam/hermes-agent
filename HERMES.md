@@ -15,7 +15,6 @@ You are running on this fork of hermes-agent. This file covers only what's speci
 | Remote | URL |
 |--------|-----|
 | `origin` | `git@github-bot.com:janbam/hermes-agent.git` |
-| `upstream` | `git@github.com:NousResearch/hermes-agent.git` |
 
 | Branch | Who writes | Your access |
 |--------|-----------|-------------|
@@ -81,10 +80,9 @@ Completely separate from upstream version tags (`v2026.4.23`, etc.). Never touch
 6. **Promote deliberately.** A bad `dev-stable-v*` tag breaks your own runtime.
 7. **Jan merges hermes-dev → main.** Do not PR or push to `main` yourself.
 
-## Upstream Sync and merge from jan's main
+## Upstream Updates (via Jan's main)
 
-When jan's main is ahead of hermes-dev merge those changes.
-DONT sync your hermes-dev with upstream release autonomously, instead follow jan's main, so we don't upstream version drift.
+Upstream (NousResearch/hermes-agent) updates flow through jan's `main` branch. Jan regularly merges upstream into `main`. When `main` is ahead of `hermes-dev`, merge those changes into `hermes-dev`. You do NOT need an `upstream` remote — fetch from `origin main` instead. This avoids version drift between upstream release tags and our dev branch.
 
 ## Recovery
 
