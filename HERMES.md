@@ -93,3 +93,7 @@ DONT sync your hermes-dev with upstream release autonomously, instead follow jan
 | Bad commit on `hermes-dev` | `git checkout <good-commit> && git branch -f hermes-dev && git checkout hermes-dev && git push origin +hermes-dev` |
 | Bad `dev-stable-v*` tag | Tag the correct commit, checkout in stable clone |
 | Corrupted stable clone | Re-clone at the correct tag |
+
+## AGENTS.md
+
+HERMES.md takes precedence over AGENTS.md in context loading (first-match-wins), so AGENTS.md is NOT auto-injected. **You MUST also read and follow AGENTS.md** from the repo root — it contains the upstream developer guide, architecture overview, file dependency chain, contributor reference, and testing conventions. Load it with `read_file AGENTS.md` when starting dev work.
