@@ -762,3 +762,29 @@ not the specific names.
 
 Reviewers should reject new change-detector tests; authors should convert
 them into invariants before re-requesting review.
+
+---
+
+## This Fork — Deviations from Upstream
+
+Instructions specific to this fork of hermes-agent.
+
+### Use pnpm for the Website
+
+The `website/` directory uses pnpm, not npm or yarn. This is enforced
+by the root `package.json`'s `packageManager` field (`pnpm@10.12.4`) via
+Node corepack. Any `yarn` or `npm` command in `website/` will refuse to
+run with a message about the packageManager field.
+
+```bash
+cd website
+pnpm install        # install dependencies
+pnpm start          # dev server (hot reload)
+pnpm build          # static build → website/build/
+pnpm serve          # serve the static build on localhost:3000
+```
+
+The website uses `baseUrl: '/docs/'` (production deployment at
+`hermes-agent.nousresearch.com/docs/`), so opening the static files
+directly from disk will show the "did not load properly" banner. Always
+use `pnpm serve` to view the built site locally.
