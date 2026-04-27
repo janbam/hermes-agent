@@ -20,7 +20,7 @@
   "dependencies": {
     "@docusaurus/core": "3.9.2",
     "@docusaurus/preset-classic": "3.9.2",
-    "@docusaurus/theme-mermaid": "^3.9.2",
+    "@docusaurus/theme-mermaid": "3.9.2",
     "@easyops-cn/docusaurus-search-local": "^0.55.1",
     "@mdx-js/react": "^3.0.0",
     "clsx": "^2.0.0",
@@ -48,5 +48,32 @@
   },
   "engines": {
     "node": ">=20.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "webpack": "5.95.0",
+      "@docusaurus/babel": "3.9.2",
+      "@docusaurus/bundler": "3.9.2",
+      "@docusaurus/cssnano-preset": "3.9.2",
+      "@docusaurus/logger": "3.9.2",
+      "@docusaurus/mdx-loader": "3.9.2",
+      "@docusaurus/plugin-content-blog": "3.9.2",
+      "@docusaurus/plugin-content-docs": "3.9.2",
+      "@docusaurus/plugin-content-pages": "3.9.2",
+      "@docusaurus/plugin-css-cascade-layers": "3.9.2",
+      "@docusaurus/plugin-debug": "3.9.2",
+      "@docusaurus/plugin-google-analytics": "3.9.2",
+      "@docusaurus/plugin-google-gtag": "3.9.2",
+      "@docusaurus/plugin-google-tag-manager": "3.9.2",
+      "@docusaurus/plugin-sitemap": "3.9.2",
+      "@docusaurus/plugin-svgr": "3.9.2",
+      "@docusaurus/react-loadable": "3.9.2",
+      "@docusaurus/theme-classic": "3.9.2",
+      "@docusaurus/theme-common": "3.9.2",
+      "@docusaurus/theme-search-algolia": "3.9.2",
+      "@docusaurus/utils": "3.9.2",
+      "@docusaurus/utils-common": "3.9.2",
+      "@docusaurus/utils-validation": "3.9.2"
+    }
   }
 }
