@@ -2703,6 +2703,15 @@ def _(rid, params: dict) -> dict:
             if agent is not None:
                 agent.verbose_logging = nv == "verbose"
                 agent.detailed_output = nv in ("detailed", "verbose")
+                # Sync Python logging with the new verbosity level.
+                if nv == "verbose":
+                    from hermes_logging import setup_verbose_logging
+                    setup_verbose_logging()
+                else:
+                    import logging
+                    root = logging.getLogger()
+                    if root.level <= logging.DEBUG:
+                        root.setLevel(logging.INFO)
         return _ok(rid, {"key": key, "value": nv})
 
     if key == "yolo":

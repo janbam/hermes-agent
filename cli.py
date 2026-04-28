@@ -1911,7 +1911,11 @@ class HermesCLI:
         else:
             self.busy_input_mode = "interrupt"
 
-        self.verbose = verbose if verbose is not None else (self.tool_progress_mode == "verbose")
+        # When the user didn't pass -v/--verbose, honour the config's
+        # tool_progress setting so "verbose" in config actually enables
+        # verbose_logging (and thus setup_verbose_logging in AIAgent).
+        # `verbose` is always True/False from store_true, never None.
+        self.verbose = verbose if verbose else (self.tool_progress_mode == "verbose")
         # detailed: clean turn detail without debug log noise.
         # verbose implies detailed for backward compat.
         self.detailed = (self.tool_progress_mode in ("detailed", "verbose"))
@@ -6804,6 +6808,17 @@ class HermesCLI:
             self.agent.detailed_output = self.detailed
             self.agent.quiet_mode = not (self.verbose or self.detailed)
             self.agent.reasoning_callback = self._current_reasoning_callback()
+            # Sync Python logging with the new verbosity level.
+            # setup_verbose_logging() is idempotent — safe to call whenever
+            # we enter VERBOSE mode (even if the handler already exists).
+            if self.verbose:
+                from hermes_logging import setup_verbose_logging
+                setup_verbose_logging()
+            else:
+                import logging
+                root = logging.getLogger()
+                if root.level <= logging.DEBUG:
+                    root.setLevel(logging.INFO)
 
         # Use raw ANSI codes via _cprint so the output is routed through
         # prompt_toolkit's renderer.  self.console.print() with Rich markup
