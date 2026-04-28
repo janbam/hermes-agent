@@ -952,6 +952,7 @@ class AIAgent:
         # detailed_output shows clean turn detail without debug log spam.
         # verbose_logging implies detailed_output for backward compat.
         self.detailed_output = detailed_output or verbose_logging
+        self._reasoning_shown_via_delta = False
         self.quiet_mode = quiet_mode
         self.ephemeral_system_prompt = ephemeral_system_prompt
         self.platform = platform  # "cli", "telegram", "discord", "whatsapp", etc.
@@ -8364,13 +8365,15 @@ class AIAgent:
             lines = []
             for key, value in obj.items():
                 if isinstance(value, str):
-                    rendered = value.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r').replace('\\"', '"')
-                    if '\n' in rendered:
+                    # JSON already parsed by json.loads — values are proper Python
+                    # strings.  Only newlines/tabs need rendering; quotes are already
+                    # real " characters (unescaped by the parser).
+                    if '\n' in value:
                         lines.append(f'{indent}"{key}":')
                         for line in rendered.split('\n'):
                             lines.append(f"{indent}  {line}")
                     else:
-                        lines.append(f'{indent}"{key}": {rendered}')
+                        lines.append(f'{indent}"{key}": {value}')
                 elif isinstance(value, (dict, list)):
                     lines.append(f'{indent}"{key}":')
                     lines.append(AIAgent._format_for_display(value, indent + "  "))
@@ -8385,25 +8388,27 @@ class AIAgent:
             lines = []
             for item in obj:
                 if isinstance(item, str):
-                    rendered = item.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r').replace('\\"', '"')
-                    if '\n' in rendered:
-                        lines.append(f"{indent}- {rendered.split(chr(10))[0]}")
-                        for line in rendered.split('\n')[1:]:
+                    if '\n' in item:
+                        lines.append(f"{indent}- {item.split(chr(10))[0]}")
+                        for line in item.split('\n')[1:]:
                             lines.append(f"{indent}  {line}")
                     else:
-                        lines.append(f"{indent}- {rendered}")
+                        lines.append(f"{indent}- {item}")
                 elif isinstance(item, (dict, list)):
                     lines.append(f"{indent}-")
                     lines.append(AIAgent._format_for_display(item, indent + "  "))
+                elif isinstance(item, bool):
+                    lines.append(f"{indent}- {'true' if item else 'false'}")
+                elif item is None:
+                    lines.append(f"{indent}- null")
                 else:
                     lines.append(f"{indent}- {item}")
             return '\n'.join(lines)
         elif isinstance(obj, str):
             # Top-level string (e.g. plain tool result)
-            rendered = obj.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r').replace('\\"', '"')
-            if '\n' in rendered:
-                return '\n'.join(f"{indent}{line}" for line in rendered.split('\n'))
-            return f"{indent}{rendered}"
+            if '\n' in obj:
+                return '\n'.join(f"{indent}{line}" for line in obj.split('\n'))
+            return f"{indent}{obj}"
         else:
             return f"{indent}{obj}"
 
@@ -8690,7 +8695,7 @@ class AIAgent:
                         result_obj = json.loads(function_result)
                     except (json.JSONDecodeError, TypeError):
                         result_obj = function_result
-                    if isinstance(result_obj, dict):
+                    if isinstance(result_obj, (dict, list)):
                         print(f"     Result:")
                         print(self._format_for_display(result_obj, indent="       "))
                     else:
@@ -9105,7 +9110,7 @@ class AIAgent:
                         result_obj = json.loads(function_result)
                     except (json.JSONDecodeError, TypeError):
                         result_obj = function_result
-                    if isinstance(result_obj, dict):
+                    if isinstance(result_obj, (dict, list)):
                         print(f"     Result:")
                         print(self._format_for_display(result_obj, indent="       "))
                     else:

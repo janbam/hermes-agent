@@ -467,7 +467,7 @@ def test_config_set_reasoning_updates_live_session_and_agent(tmp_path, monkeypat
 
 def test_config_set_verbose_updates_session_mode_and_agent(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "_hermes_home", tmp_path)
-    agent = types.SimpleNamespace(verbose_logging=False)
+    agent = types.SimpleNamespace(verbose_logging=False, detailed_output=False)
     server._sessions["sid"] = _session(agent=agent)
 
     resp = server.handle_request(
@@ -478,9 +478,11 @@ def test_config_set_verbose_updates_session_mode_and_agent(tmp_path, monkeypatch
         }
     )
 
-    assert resp["result"]["value"] == "verbose"
-    assert server._sessions["sid"]["tool_progress_mode"] == "verbose"
-    assert agent.verbose_logging is True
+    # "all" → "detailed" (first cycle step in the 5-mode cycle)
+    assert resp["result"]["value"] == "detailed"
+    assert server._sessions["sid"]["tool_progress_mode"] == "detailed"
+    assert agent.verbose_logging is False  # detailed doesn't enable debug logs
+    assert agent.detailed_output is True
 
 
 def test_config_set_model_uses_live_switch_path(monkeypatch):

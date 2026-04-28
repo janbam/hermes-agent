@@ -77,17 +77,17 @@ class TestVerboseCommand:
         runner = _make_runner()
         result = await runner._handle_verbose_command(_make_event())
 
-        # all -> verbose
-        assert "VERBOSE" in result
+        # all -> detailed (next after all in the 5-mode cycle)
+        assert "DETAILED" in result
         assert "telegram" in result.lower()  # per-platform feedback
 
         # Verify config was saved to display.platforms.telegram
         saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        assert saved["display"]["platforms"]["telegram"]["tool_progress"] == "verbose"
+        assert saved["display"]["platforms"]["telegram"]["tool_progress"] == "detailed"
 
     @pytest.mark.asyncio
     async def test_cycles_through_all_modes(self, tmp_path, monkeypatch):
-        """Calling /verbose repeatedly cycles through all four modes."""
+        """Calling /verbose repeatedly cycles through all five modes."""
         hermes_home = tmp_path / "hermes"
         hermes_home.mkdir()
         config_path = hermes_home / "config.yaml"
@@ -99,8 +99,8 @@ class TestVerboseCommand:
         monkeypatch.setattr(gateway_run, "_hermes_home", hermes_home)
         runner = _make_runner()
 
-        # off -> new -> all -> verbose -> off
-        expected = ["new", "all", "verbose", "off"]
+        # off -> new -> all -> detailed -> verbose -> off
+        expected = ["new", "all", "detailed", "verbose", "off"]
         for mode in expected:
             result = await runner._handle_verbose_command(_make_event())
             saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -124,10 +124,10 @@ class TestVerboseCommand:
         runner = _make_runner()
         result = await runner._handle_verbose_command(_make_event())
 
-        # Telegram default is "all" (high tier) → cycles to verbose
-        assert "VERBOSE" in result
+        # Telegram default is "all" (high tier) → cycles to detailed
+        assert "DETAILED" in result
         saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        assert saved["display"]["platforms"]["telegram"]["tool_progress"] == "verbose"
+        assert saved["display"]["platforms"]["telegram"]["tool_progress"] == "detailed"
 
     @pytest.mark.asyncio
     async def test_per_platform_isolation(self, tmp_path, monkeypatch):
@@ -159,8 +159,8 @@ class TestVerboseCommand:
 
         saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         platforms = saved["display"]["platforms"]
-        # Telegram: all -> verbose (high tier default = all)
-        assert platforms["telegram"]["tool_progress"] == "verbose"
+        # Telegram: all -> detailed (high tier default = all)
+        assert platforms["telegram"]["tool_progress"] == "detailed"
         # Slack: off -> new (first /verbose cycle from quiet default)
         assert platforms["slack"]["tool_progress"] == "new"
 
