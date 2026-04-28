@@ -8370,7 +8370,7 @@ class AIAgent:
                     # real " characters (unescaped by the parser).
                     if '\n' in value:
                         lines.append(f'{indent}"{key}":')
-                        for line in rendered.split('\n'):
+                        for line in value.split('\n'):
                             lines.append(f"{indent}  {line}")
                     else:
                         lines.append(f'{indent}"{key}": {value}')
