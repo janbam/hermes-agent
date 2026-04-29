@@ -565,7 +565,7 @@ def prompt_dangerous_approval(command: str, description: str,
 
             if thread.is_alive():
                 print("\n      ⏱ Timeout - denying command")
-                return "deny"
+                return "deny_timeout"
 
             choice = result["choice"]
             if choice in ('o', 'once'):
@@ -779,6 +779,18 @@ def check_dangerous_command(command: str, env_type: str,
         return {
             "approved": False,
             "message": f"BLOCKED: User denied this potentially dangerous command (matched '{description}' pattern). Do NOT retry this command - the user has explicitly rejected it.",
+            "pattern_key": pattern_key,
+            "description": description,
+        }
+    if choice == "deny_timeout":
+        return {
+            "approved": False,
+            "message": (
+                "BLOCKED: Approval request timed out — the user appears to be "
+                "away from keyboard and did not respond in time. End your turn "
+                "now. The user can review and approve the command when they "
+                "return. Do NOT retry or loop waiting for approval."
+            ),
             "pattern_key": pattern_key,
             "description": description,
         }
@@ -1041,10 +1053,21 @@ def check_all_command_guards(command: str, env_type: str,
 
             choice = entry.result
             if not resolved or choice is None or choice == "deny":
-                reason = "timed out" if not resolved else "denied by user"
+                if not resolved:
+                    reason = "timed out"
+                    detail = (
+                        "BLOCKED: Approval request timed out — the user appears "
+                        "to be away from keyboard and did not respond in time. "
+                        "End your turn now. The user can review and approve the "
+                        "command when they return. Do NOT retry or loop waiting "
+                        "for approval."
+                    )
+                else:
+                    reason = "denied by user"
+                    detail = f"BLOCKED: Command {reason}. Do NOT retry this command."
                 return {
                     "approved": False,
-                    "message": f"BLOCKED: Command {reason}. Do NOT retry this command.",
+                    "message": detail,
                     "pattern_key": primary_key,
                     "description": combined_desc,
                 }
@@ -1092,6 +1115,18 @@ def check_all_command_guards(command: str, env_type: str,
         return {
             "approved": False,
             "message": "BLOCKED: User denied. Do NOT retry.",
+            "pattern_key": primary_key,
+            "description": combined_desc,
+        }
+    if choice == "deny_timeout":
+        return {
+            "approved": False,
+            "message": (
+                "BLOCKED: Approval request timed out — the user appears to be "
+                "away from keyboard and did not respond in time. End your turn "
+                "now. The user can review and approve the command when they "
+                "return. Do NOT retry or loop waiting for approval."
+            ),
             "pattern_key": primary_key,
             "description": combined_desc,
         }
