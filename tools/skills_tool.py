@@ -853,7 +853,8 @@ def skill_view(
     View the content of a skill or a specific file within a skill directory.
 
     Args:
-        name: Name or path of the skill (e.g., "axolotl" or "03-fine-tuning/axolotl").
+        name: Declared skill name (e.g., "axolotl"). Local skills are resolved
+            by their frontmatter name only; categories/directories are organizational.
             Qualified names like "plugin:skill" resolve to plugin-provided skills.
         file_path: Optional path to a specific file within the skill (e.g., "references/api.md")
         task_id: Optional task identifier used to probe the active backend
@@ -865,26 +866,31 @@ def skill_view(
         JSON string with skill content or error message
     """
     try:
-        local_lookup_names = [name]
-        plugin_missing_response = None
+        requested_name = (name or "").strip()
+        if not requested_name:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "Skill name is required.",
+                    "hint": "Use skills_list to see available skills",
+                },
+                ensure_ascii=False,
+            )
 
         # ── Qualified name dispatch (plugin skills) ──────────────────
-        # Names containing ':' are first routed to the plugin skill registry.
-        # If no plugin skill matches, the same syntax is also accepted as a
-        # category-qualified local skill alias: "creative:creative-ideation"
-        # maps to "creative/creative-ideation". This keeps plugin exact matches
-        # authoritative while making local category aliases ergonomic.
-        if ":" in name:
+        # ``plugin:skill`` is reserved for plugin-provided skills. Local skill
+        # categories are organizational only and never participate in identity.
+        if ":" in requested_name:
             from agent.skill_utils import is_valid_namespace, parse_qualified_name
             from hermes_cli.plugins import discover_plugins, get_plugin_manager
 
-            namespace, bare = parse_qualified_name(name)
+            namespace, bare = parse_qualified_name(requested_name)
             if not is_valid_namespace(namespace):
                 return json.dumps(
                     {
                         "success": False,
                         "error": (
-                            f"Invalid namespace '{namespace}' in '{name}'. "
+                            f"Invalid namespace '{namespace}' in '{requested_name}'. "
                             f"Namespaces must match [a-zA-Z0-9_-]+."
                         ),
                     },
@@ -893,17 +899,17 @@ def skill_view(
 
             discover_plugins()  # idempotent
             pm = get_plugin_manager()
-            plugin_skill_md = pm.find_plugin_skill(name)
+            plugin_skill_md = pm.find_plugin_skill(requested_name)
 
             if plugin_skill_md is not None:
                 if not plugin_skill_md.exists():
                     # Stale registry entry — file deleted out of band
-                    pm.remove_plugin_skill(name)
+                    pm.remove_plugin_skill(requested_name)
                     return json.dumps(
                         {
                             "success": False,
                             "error": (
-                                f"Skill '{name}' file no longer exists at "
+                                f"Skill '{requested_name}' file no longer exists at "
                                 f"{plugin_skill_md}. The registry entry has "
                                 f"been cleaned up — try again after the "
                                 f"plugin is reloaded."
@@ -919,12 +925,9 @@ def skill_view(
                     session_id=task_id,
                 )
 
-            # Plugin exact match not found. Preserve the plugin-specific
-            # diagnostic for later, but still allow a local category alias with
-            # the same qualified text to resolve before returning not-found.
             available = pm.list_plugin_skills(namespace)
             if available:
-                plugin_missing_response = json.dumps(
+                return json.dumps(
                     {
                         "success": False,
                         "error": f"Skill '{bare}' not found in plugin '{namespace}'.",
@@ -934,11 +937,14 @@ def skill_view(
                     ensure_ascii=False,
                 )
 
-            # Fall through to local skill scan. Treat namespace:skill as a
-            # local category/skill alias there.
-            category_alias = f"{namespace}/{bare}"
-            if category_alias not in local_lookup_names:
-                local_lookup_names.append(category_alias)
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"Plugin skill '{requested_name}' not found.",
+                    "hint": "Use 'plugin:skill' only for plugin-provided skills; load local skills by bare skill name.",
+                },
+                ensure_ascii=False,
+            )
 
         from agent.skill_utils import get_external_skills_dirs
 
@@ -960,73 +966,32 @@ def skill_view(
         skill_dir = None
         skill_md = None
 
-        # Search all dirs: local first, then external (first match wins)
+        # Search all dirs by declared local skill name. Category directories are
+        # organization only: moving a skill must not change its identifier.
         for search_dir in all_dirs:
-            for lookup_name in local_lookup_names:
-                # Try direct path first (e.g., "mlops/axolotl")
-                direct_path = search_dir / lookup_name
-                if direct_path.is_dir() and (direct_path / "SKILL.md").exists():
-                    skill_dir = direct_path
-                    skill_md = direct_path / "SKILL.md"
-                    break
-                elif direct_path.with_suffix(".md").exists():
-                    skill_md = direct_path.with_suffix(".md")
+            from agent.skill_utils import iter_skill_index_files
+
+            for found_skill_md in iter_skill_index_files(search_dir, "SKILL.md"):
+                dir_name = found_skill_md.parent.name
+                frontmatter_name = dir_name
+                try:
+                    content_preview = found_skill_md.read_text(encoding="utf-8")[:4000]
+                    found_frontmatter, _ = _parse_frontmatter(content_preview)
+                    frontmatter_name = str(found_frontmatter.get("name") or dir_name)
+                except Exception:
+                    pass
+
+                if frontmatter_name == requested_name:
+                    skill_dir = found_skill_md.parent
+                    skill_md = found_skill_md
                     break
             if skill_md:
                 break
 
-        # Search by directory name and frontmatter name across all dirs.
-        # skills_list() advertises frontmatter "name", so skill_view() must
-        # accept that same advertised name even when the directory slug differs.
-        if not skill_md:
-            for search_dir in all_dirs:
-                from agent.skill_utils import iter_skill_index_files
-
-                for found_skill_md in iter_skill_index_files(search_dir, "SKILL.md"):
-                    try:
-                        rel_parent = found_skill_md.parent.relative_to(search_dir)
-                        rel_dir = rel_parent.as_posix()
-                        rel_parts = rel_parent.parts
-                    except ValueError:
-                        rel_dir = found_skill_md.parent.name
-                        rel_parts = (found_skill_md.parent.name,)
-
-                    category = rel_parts[0] if len(rel_parts) >= 2 else None
-                    dir_name = found_skill_md.parent.name
-                    frontmatter_name = dir_name
-                    try:
-                        content_preview = found_skill_md.read_text(encoding="utf-8")[:4000]
-                        found_frontmatter, _ = _parse_frontmatter(content_preview)
-                        frontmatter_name = str(found_frontmatter.get("name") or dir_name)
-                    except Exception:
-                        pass
-
-                    matched = False
-                    for lookup_name in local_lookup_names:
-                        normalized_lookup = lookup_name.replace(":", "/", 1)
-                        if normalized_lookup in {rel_dir, dir_name, frontmatter_name}:
-                            matched = True
-                            break
-                        if "/" in normalized_lookup:
-                            lookup_category, _, lookup_bare = normalized_lookup.partition("/")
-                            if (
-                                category == lookup_category
-                                and lookup_bare in {dir_name, frontmatter_name}
-                            ):
-                                matched = True
-                                break
-
-                    if matched:
-                        skill_dir = found_skill_md.parent
-                        skill_md = found_skill_md
-                        break
-                if skill_md:
-                    break
-
         # Legacy: flat .md files
         if not skill_md:
             for search_dir in all_dirs:
-                for found_md in search_dir.rglob(f"{name}.md"):
+                for found_md in search_dir.rglob(f"{requested_name}.md"):
                     if found_md.name != "SKILL.md":
                         skill_md = found_md
                         break
@@ -1034,13 +999,11 @@ def skill_view(
                     break
 
         if not skill_md or not skill_md.exists():
-            if plugin_missing_response is not None:
-                return plugin_missing_response
             available = [s["name"] for s in _sort_skills(_find_all_skills())[:20]]
             return json.dumps(
                 {
                     "success": False,
-                    "error": f"Skill '{name}' not found.",
+                    "error": f"Skill '{requested_name}' not found.",
                     "available_skills": available,
                     "hint": "Use skills_list to see all available skills",
                 },
@@ -1054,7 +1017,7 @@ def skill_view(
             return json.dumps(
                 {
                     "success": False,
-                    "error": f"Failed to read skill '{name}': {e}",
+                    "error": f"Failed to read skill '{requested_name}': {e}",
                 },
                 ensure_ascii=False,
             )
@@ -1086,7 +1049,7 @@ def skill_view(
                 _warnings.append(f"skill file is outside the trusted skills directory (~/.hermes/skills/): {skill_md}")
             if _injection_detected:
                 _warnings.append("skill content contains patterns that may indicate prompt injection")
-            logging.getLogger(__name__).warning("Skill security warning for '%s': %s", name, "; ".join(_warnings))
+            logging.getLogger(__name__).warning("Skill security warning for '%s': %s", requested_name, "; ".join(_warnings))
 
         parsed_frontmatter: Dict[str, Any] = {}
         try:

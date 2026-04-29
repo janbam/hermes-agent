@@ -186,11 +186,10 @@ def _build_skill_message(
                         supporting.append(rel)
 
     if supporting and skill_dir:
-        try:
-            skill_view_target = str(skill_dir.relative_to(SKILLS_DIR))
-        except ValueError:
-            # Skill is from an external dir — use the skill name instead
-            skill_view_target = skill_dir.name
+        # Use the skill's frontmatter name as the identity for skill_view(),
+        # not the category directory path.
+        frontmatter_name = str(loaded_skill.get("name") or "")
+        skill_view_target = frontmatter_name if "/" not in frontmatter_name else skill_dir.name
         parts.append("")
         parts.append("[This skill has supporting files:]")
         for sf in supporting:
@@ -323,7 +322,7 @@ def build_skill_invocation_message(
     if not skill_info:
         return None
 
-    loaded = _load_skill_payload(skill_info["skill_dir"], task_id=task_id)
+    loaded = _load_skill_payload(skill_info["name"], task_id=task_id)
     if not loaded:
         return f"[Failed to load skill: {skill_info['name']}]"
 

@@ -244,7 +244,7 @@ class TestBuildPreloadedSkillsPrompt:
 
 
 class TestBuildSkillInvocationMessage:
-    def test_loads_skill_by_stored_path_when_frontmatter_name_differs(self, tmp_path):
+    def test_loads_skill_by_frontmatter_name_when_directory_slug_differs(self, tmp_path):
         skill_dir = tmp_path / "mlops" / "audiocraft"
         skill_dir.mkdir(parents=True, exist_ok=True)
         (skill_dir / "SKILL.md").write_text(
@@ -259,6 +259,9 @@ description: Generate audio with AudioCraft.
 Generate some audio.
 """
         )
+        references = skill_dir / "references"
+        references.mkdir()
+        (references / "api.md").write_text("reference")
 
         with patch("tools.skills_tool.SKILLS_DIR", tmp_path):
             scan_skill_commands()
@@ -267,6 +270,8 @@ Generate some audio.
         assert msg is not None
         assert "AudioCraft" in msg
         assert "compose" in msg
+        assert 'skill_view(name="audiocraft-audio-generation", file_path="<path>")' in msg
+        assert 'skill_view(name="mlops/audiocraft"' not in msg
 
     def test_builds_message(self, tmp_path):
         with patch("tools.skills_tool.SKILLS_DIR", tmp_path):
