@@ -42,6 +42,10 @@ Peer-matched shape used by every skill under `skills/software-development/`:
 ---
 name: my-skill-name               # lowercase, hyphens, ≤64 chars (MAX_NAME_LENGTH)
 description: Use when <trigger>. <one-line behavior>.
+triggers:                         # Optional — array of strings telling the agent when to use this skill
+  - "debugging Python"
+  - "test failures"
+  - "traceback investigation"
 version: 1.0.0
 author: Hermes Agent
 license: MIT
@@ -51,6 +55,8 @@ metadata:
     related_skills: [other-skill, another-skill]
 ---
 ```
+
+`triggers` is an optional array of concise conditional continuations of `Use when [...]` — short keyword phrases that help the agent decide when to load this skill. Triggers appear in the `<available_skills>` system prompt injection as `[Use when: "...", "..."]` and in `skill_view` output. They supplement the description, not replace it.
 
 `version` / `author` / `license` / `metadata` are NOT enforced by the validator, but every peer has them — omit and your skill sticks out.
 

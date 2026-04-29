@@ -577,11 +577,20 @@ def _build_snapshot_entry(
     if isinstance(platforms, str):
         platforms = [platforms]
 
+    triggers = frontmatter.get("triggers", [])
+    if not isinstance(triggers, list):
+        # Recover from invalid YAML comma-separated forms (e.g. "debug", "test")
+        s = str(triggers).strip()
+        if s.startswith("[") and s.endswith("]"):
+            s = s[1:-1]
+        triggers = [t.strip().strip("\"'") for t in s.split(",") if t.strip()] if s else []
+
     return {
         "skill_name": skill_name,
         "category": category,
         "frontmatter_name": str(frontmatter.get("name", skill_name)),
         "description": description,
+        "triggers": [str(t).strip() for t in triggers if str(t).strip()],
         "platforms": [str(p).strip() for p in platforms if str(p).strip()],
         "conditions": extract_skill_conditions(frontmatter),
     }
@@ -692,7 +701,7 @@ def build_skills_system_prompt(
     # ── Layer 2: disk snapshot ────────────────────────────────────────
     snapshot = _load_skills_snapshot(skills_dir)
 
-    skills_by_category: dict[str, list[tuple[str, str]]] = {}
+    skills_by_category: dict[str, list[tuple[str, str, list[str]]]] = {}
     category_descriptions: dict[str, str] = {}
 
     if snapshot is not None:
@@ -714,8 +723,9 @@ def build_skills_system_prompt(
                 available_toolsets,
             ):
                 continue
+            triggers = entry.get("triggers") or []
             skills_by_category.setdefault(category, []).append(
-                (frontmatter_name, entry.get("description", ""))
+                (frontmatter_name, entry.get("description", ""), triggers)
             )
         category_descriptions = {
             str(k): str(v)
@@ -740,7 +750,7 @@ def build_skills_system_prompt(
             ):
                 continue
             skills_by_category.setdefault(entry["category"], []).append(
-                (entry["frontmatter_name"], entry["description"])
+                (entry["frontmatter_name"], entry["description"], entry.get("triggers", []))
             )
 
         # Read category-level DESCRIPTION.md files
@@ -770,7 +780,7 @@ def build_skills_system_prompt(
     # precedence: we track seen names and skip duplicates from external dirs.
     seen_skill_names: set[str] = set()
     for cat_skills in skills_by_category.values():
-        for name, _desc in cat_skills:
+        for name, _desc, _triggers in cat_skills:
             seen_skill_names.add(name)
 
     for ext_dir in external_dirs:
@@ -796,7 +806,7 @@ def build_skills_system_prompt(
                     continue
                 seen_skill_names.add(frontmatter_name)
                 skills_by_category.setdefault(entry["category"], []).append(
-                    (frontmatter_name, entry["description"])
+                    (frontmatter_name, entry["description"], entry.get("triggers", []))
                 )
             except Exception as e:
                 logger.debug("Error reading external skill %s: %s", skill_file, e)
@@ -827,14 +837,15 @@ def build_skills_system_prompt(
                 index_lines.append(f"  {category}:")
             # Deduplicate and sort skills within each category
             seen = set()
-            for name, desc in sorted(skills_by_category[category], key=lambda x: x[0]):
+            for name, desc, triggers in sorted(skills_by_category[category], key=lambda x: x[0]):
                 if name in seen:
                     continue
                 seen.add(name)
+                trigger_str = f' [Use when: {", ".join(f"\"{t}\"" for t in triggers)}]' if triggers else ""
                 if desc:
-                    index_lines.append(f"    - {name}: {desc}")
+                    index_lines.append(f"    - {name}: {desc}{trigger_str}")
                 else:
-                    index_lines.append(f"    - {name}")
+                    index_lines.append(f"    - {name}{trigger_str}")
 
         result = (
             "## Skills (mandatory)\n"

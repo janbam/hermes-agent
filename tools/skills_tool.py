@@ -29,6 +29,9 @@ SKILL.md Format (YAML Frontmatter, agentskills.io compatible):
     ---
     name: skill-name              # Required, max 64 chars
     description: Brief description # Required, max 1024 chars
+    triggers:                     # Optional — array of keyword hints for when to use
+      - debugging Python
+      - test failures
     version: 1.0.0                # Optional
     license: MIT                  # Optional (agentskills.io)
     platforms: [macos]            # Optional — restrict to specific OS platforms
@@ -497,6 +500,38 @@ def _parse_tags(tags_value) -> List[str]:
 
 
 
+def _parse_triggers(triggers_value) -> List[str]:
+    """
+    Parse triggers from frontmatter value.
+
+    Handles:
+    - Already-parsed list (from yaml.safe_load): [trigger1, trigger2]
+    - Bare string: trigger1
+    - Quoted string: \"trigger1\"
+    - Comma-separated string: \"trigger1\", \"trigger2\" (invalid YAML, recovered via fallback)
+    - String with brackets: \"[trigger1, trigger2]\" (resilient parsing)
+
+    Args:
+        triggers_value: Raw triggers value — may be a list or string
+
+    Returns:
+        List of trigger strings
+    """
+    if not triggers_value:
+        return []
+
+    # yaml.safe_load already returns a list for [trigger1, trigger2] or block sequences
+    if isinstance(triggers_value, list):
+        return [str(t).strip() for t in triggers_value if t]
+
+    # String fallback — handle bracket-wrapped, comma-separated, or bare
+    triggers_value = str(triggers_value).strip()
+    if triggers_value.startswith("[") and triggers_value.endswith("]"):
+        triggers_value = triggers_value[1:-1]
+
+    return [t.strip().strip("\"'") for t in triggers_value.split(",") if t.strip()]
+
+
 def _get_disabled_skill_names() -> Set[str]:
     """Load disabled skill names from config.
 
@@ -601,12 +636,17 @@ def _find_all_skills(*, skip_disabled: bool = False) -> List[Dict[str, Any]]:
 
                 category = _get_category_from_path(skill_md)
 
+                triggers = _parse_triggers(frontmatter.get("triggers", []))
+
                 seen_names.add(name)
-                skills.append({
+                skill_entry = {
                     "name": name,
                     "description": description,
                     "category": category,
-                })
+                }
+                if triggers:
+                    skill_entry["triggers"] = triggers
+                skills.append(skill_entry)
 
             except (UnicodeDecodeError, PermissionError) as e:
                 logger.debug("Failed to read skill file %s: %s", skill_md, e)
@@ -672,15 +712,15 @@ def skills_list(category: str = None, task_id: str = None) -> str:
     """
     List all available skills (progressive disclosure tier 1 - minimal metadata).
 
-    Returns only name + description to minimize token usage. Use skill_view() to
-    load full content, tags, related files, etc.
+    Returns name + description (+ triggers when present) to minimize token usage.
+    Use skill_view() to load full content, tags, related files, etc.
 
     Args:
         category: Optional category filter (e.g., "mlops")
         task_id: Optional task identifier used to probe the active backend
 
     Returns:
-        JSON string with minimal skill info: name, description, category
+        JSON string with minimal skill info: name, description, category, triggers (if non-empty)
     """
     try:
         if not SKILLS_DIR.exists():
@@ -797,6 +837,8 @@ def _serve_plugin_skill(
     if len(description) > MAX_DESCRIPTION_LENGTH:
         description = description[: MAX_DESCRIPTION_LENGTH - 3] + "..."
 
+    triggers = _parse_triggers(parsed_frontmatter.get("triggers", []))
+
     # Bundle context banner — tells the agent about sibling skills
     try:
         siblings = [
@@ -830,12 +872,18 @@ def _serve_plugin_skill(
                 "Could not preprocess plugin skill %s:%s", namespace, bare, exc_info=True
             )
 
+    triggers_display = (
+        "\n".join(f" - {t}" for t in triggers) if triggers else None
+    )
+
     return json.dumps(
         {
             "success": True,
             "name": f"{namespace}:{bare}",
             "content": f"{banner}{rendered_content}" if banner else rendered_content,
             "description": description,
+            "triggers": triggers,
+            "triggers_display": triggers_display,
             "linked_files": None,
             "readiness_status": SkillReadinessStatus.AVAILABLE.value,
         },
@@ -1342,10 +1390,18 @@ def skill_view(
                     "Could not preprocess skill content for %s", skill_name, exc_info=True
                 )
 
+        triggers = _parse_triggers(frontmatter.get("triggers", []))
+
+        triggers_display = (
+            "\n".join(f" - {t}" for t in triggers) if triggers else None
+        )
+
         result = {
             "success": True,
             "name": skill_name,
             "description": frontmatter.get("description", ""),
+            "triggers": triggers,
+            "triggers_display": triggers_display,
             "tags": tags,
             "related_skills": related_skills,
             "content": rendered_content,
@@ -1453,7 +1509,7 @@ if __name__ == "__main__":
 
 SKILLS_LIST_SCHEMA = {
     "name": "skills_list",
-    "description": "List available skills (name + description). Use skill_view(name) to load full content.",
+    "description": "List available skills (name + description + triggers). Skills with triggers carry a 'triggers' field — keyword hints for when to use them. Use skill_view(name) to load full content.",
     "parameters": {
         "type": "object",
         "properties": {
