@@ -8066,7 +8066,11 @@ class HermesCLI:
         import time as _time
 
         with self._approval_lock:
-            timeout = 60
+            from hermes_cli.config import load_config as _load_approval_config
+            try:
+                timeout = int(_load_approval_config().get("approvals", {}).get("timeout", 60))
+            except (ValueError, TypeError):
+                timeout = 60
             response_queue = queue.Queue()
 
             self._approval_state = {
