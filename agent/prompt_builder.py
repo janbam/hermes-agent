@@ -110,6 +110,60 @@ def _find_hermes_md(cwd: Path) -> Optional[Path]:
     return None
 
 
+# All known agent instruction filenames, in priority order.
+# Used by sibling detection to warn when multiple coexist.
+_ALL_AGENT_CONTEXT_FILENAMES = [
+    ".hermes.md", "HERMES.md",
+    "AGENTS.md", "agents.md",
+    "CLAUDE.md", "claude.md",
+    ".cursorrules",
+]
+
+
+def _check_sibling_context_files(directory: Path, loaded_filename: str) -> str:
+    """Scan *directory* for other agent context files and return a note.
+
+    When multiple agent instruction files coexist in the same directory,
+    only one is loaded (first-match-wins).  This generates a human-readable
+    note listing the unloaded siblings so the agent and user know they exist.
+
+    Returns an empty string when no siblings are found.
+    """
+    siblings = []
+    for name in _ALL_AGENT_CONTEXT_FILENAMES:
+        if name == loaded_filename:
+            continue
+        candidate = directory / name
+        try:
+            if not candidate.is_file():
+                continue
+        except OSError:
+            continue
+        try:
+            line_count = 0
+            with open(candidate, encoding="utf-8") as f:
+                for line_count, _ in enumerate(f, 1):
+                    pass
+            siblings.append((name, line_count))
+        except (OSError, UnicodeDecodeError):
+            pass
+
+    if not siblings:
+        return ""
+
+    lines = [
+        "",
+        "══════════════════════════════════════════════",
+        "⚠️  Other agent instruction files exist in this directory:",
+    ]
+    for name, count in sorted(siblings):
+        lines.append(f"  • {name} ({count:,} lines)")
+    lines.append(
+        "Consider reading these files with read_file for complete context."
+    )
+    return "\n".join(lines)
+
+
 def _strip_yaml_frontmatter(content: str) -> str:
     """Remove optional YAML frontmatter (``---`` delimited) from *content*.
 
@@ -1014,6 +1068,10 @@ def _load_hermes_md(cwd_path: Path) -> str:
             pass
         content = _scan_context_content(content, rel)
         result = f"## {rel}\n\n{content}"
+        # Append sibling note if other agent files exist in same directory
+        result += _check_sibling_context_files(
+            hermes_md_path.parent, hermes_md_path.name
+        )
         return _truncate_content(result, ".hermes.md")
     except Exception as e:
         logger.debug("Could not read %s: %s", hermes_md_path, e)
@@ -1030,6 +1088,7 @@ def _load_agents_md(cwd_path: Path) -> str:
                 if content:
                     content = _scan_context_content(content, name)
                     result = f"## {name}\n\n{content}"
+                    result += _check_sibling_context_files(cwd_path, name)
                     return _truncate_content(result, "AGENTS.md")
             except Exception as e:
                 logger.debug("Could not read %s: %s", candidate, e)
@@ -1046,6 +1105,7 @@ def _load_claude_md(cwd_path: Path) -> str:
                 if content:
                     content = _scan_context_content(content, name)
                     result = f"## {name}\n\n{content}"
+                    result += _check_sibling_context_files(cwd_path, name)
                     return _truncate_content(result, "CLAUDE.md")
             except Exception as e:
                 logger.debug("Could not read %s: %s", candidate, e)
@@ -1055,6 +1115,7 @@ def _load_claude_md(cwd_path: Path) -> str:
 def _load_cursorrules(cwd_path: Path) -> str:
     """.cursorrules + .cursor/rules/*.mdc — cwd only."""
     cursorrules_content = ""
+    any_cursor_loaded = False
     cursorrules_file = cwd_path / ".cursorrules"
     if cursorrules_file.exists():
         try:
@@ -1062,6 +1123,7 @@ def _load_cursorrules(cwd_path: Path) -> str:
             if content:
                 content = _scan_context_content(content, ".cursorrules")
                 cursorrules_content += f"## .cursorrules\n\n{content}\n\n"
+                any_cursor_loaded = True
         except Exception as e:
             logger.debug("Could not read .cursorrules: %s", e)
 
@@ -1074,11 +1136,14 @@ def _load_cursorrules(cwd_path: Path) -> str:
                 if content:
                     content = _scan_context_content(content, f".cursor/rules/{mdc_file.name}")
                     cursorrules_content += f"## .cursor/rules/{mdc_file.name}\n\n{content}\n\n"
+                    any_cursor_loaded = True
             except Exception as e:
                 logger.debug("Could not read %s: %s", mdc_file, e)
 
     if not cursorrules_content:
         return ""
+    if any_cursor_loaded:
+        cursorrules_content += _check_sibling_context_files(cwd_path, ".cursorrules")
     return _truncate_content(cursorrules_content, ".cursorrules")
 
 

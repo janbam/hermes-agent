@@ -885,6 +885,7 @@ class AIAgent:
         gateway_session_key: str = None,
         skip_context_files: bool = False,
         skip_memory: bool = False,
+        subdirectory_hermes_md: bool = True,
         session_db=None,
         parent_session_id: str = None,
         iteration_budget: "IterationBudget" = None,
@@ -938,6 +939,10 @@ class AIAgent:
             skip_context_files (bool): If True, skip auto-injection of SOUL.md, AGENTS.md, and .cursorrules
                 into the system prompt. Use this for batch processing and data generation to avoid
                 polluting trajectories with user-specific persona or project instructions.
+            subdirectory_hermes_md (bool): Whether to include HERMES.md files when discovering
+                subdirectory context hints during tool calls (default: True). Set to False for
+                the pre-4.2026 behaviour where only AGENTS.md / CLAUDE.md / .cursorrules are
+                checked in visited directories.
         """
         _install_safe_stdio()
 
@@ -970,6 +975,7 @@ class AIAgent:
         self._print_fn = None
         self.background_review_callback = None  # Optional sync callback for gateway delivery
         self.skip_context_files = skip_context_files
+        self.subdirectory_hermes_md = subdirectory_hermes_md
         self.pass_session_id = pass_session_id
         self._credential_pool = credential_pool
         self.log_prefix_chars = log_prefix_chars
@@ -1973,6 +1979,7 @@ class AIAgent:
 
         self._subdirectory_hints = SubdirectoryHintTracker(
             working_dir=os.getenv("TERMINAL_CWD") or None,
+            include_hermes_md=self.subdirectory_hermes_md,
         )
         self._user_turn_count = 0
 

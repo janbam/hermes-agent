@@ -389,6 +389,11 @@ DEFAULT_CONFIG = {
         # (60+ tool iterations with tiny output) before users assume the
         # bot is dead and /restart.
         "gateway_notify_interval": 180,
+        # Whether to include HERMES.md files when discovering subdirectory
+        # context hints during tool calls.  Default true — respects HERMES.md
+        # in any visited project directory.  Set to false for the pre-4.2026
+        # behaviour (AGENTS.md / CLAUDE.md / .cursorrules only).
+        "subdirectory_hermes_md": True,
     },
     
     "terminal": {

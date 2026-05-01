@@ -2063,6 +2063,11 @@ class HermesCLI:
             CLI_CONFIG["agent"].get("service_tier", "")
         )
         
+        # Subdirectory HERMES.md discovery during tool calls
+        self._subdirectory_hermes_md = CLI_CONFIG["agent"].get(
+            "subdirectory_hermes_md", True
+        )
+        
         # OpenRouter provider routing preferences
         pr = CLI_CONFIG.get("provider_routing", {}) or {}
         self._provider_sort = pr.get("sort")
@@ -3445,6 +3450,7 @@ class HermesCLI:
                 prefill_messages=self.prefill_messages or None,
                 reasoning_config=self.reasoning_config,
                 service_tier=self.service_tier,
+                subdirectory_hermes_md=self._subdirectory_hermes_md,
                 request_overrides=request_overrides,
                 providers_allowed=self._providers_only,
                 providers_ignored=self._providers_ignore,
@@ -6480,6 +6486,7 @@ class HermesCLI:
                     session_db=self._session_db,
                     reasoning_config=self.reasoning_config,
                     service_tier=self.service_tier,
+                    subdirectory_hermes_md=self._subdirectory_hermes_md,
                     request_overrides=turn_route.get("request_overrides"),
                     providers_allowed=self._providers_only,
                     providers_ignored=self._providers_ignore,
