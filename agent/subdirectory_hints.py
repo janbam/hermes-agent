@@ -19,17 +19,23 @@ import shlex
 from pathlib import Path
 from typing import Dict, Any, Optional, Set
 
-from agent.prompt_builder import _scan_context_content
+from agent.prompt_builder import _scan_context_content, _check_sibling_context_files
 
 logger = logging.getLogger(__name__)
 
 # Context files to look for in subdirectories, in priority order.
 # Same filenames as prompt_builder.py but we load ALL found (not first-wins)
 # since different subdirectories may use different conventions.
-_HINT_FILENAMES = [
+_HINT_FILENAMES_BASE = [
     "AGENTS.md", "agents.md",
     "CLAUDE.md", "claude.md",
     ".cursorrules",
+]
+
+# HERMES.md files — included when config agent.subdirectory_hermes_md is true.
+# Order matches _HERMES_MD_NAMES in prompt_builder.py for consistency.
+_HINT_FILENAMES_HERMES = [
+    ".hermes.md", "HERMES.md",
 ]
 
 # Maximum chars per hint file to prevent context bloat
@@ -50,7 +56,10 @@ class SubdirectoryHintTracker:
 
     Usage::
 
-        tracker = SubdirectoryHintTracker(working_dir="/path/to/project")
+        tracker = SubdirectoryHintTracker(
+            working_dir="/path/to/project",
+            include_hermes_md=True,
+        )
 
         # After each tool call:
         hints = tracker.check_tool_call("read_file", {"path": "backend/src/main.py"})
@@ -58,11 +67,18 @@ class SubdirectoryHintTracker:
             tool_result += hints  # append to the tool result string
     """
 
-    def __init__(self, working_dir: Optional[str] = None):
+    def __init__(self, working_dir: Optional[str] = None,
+                 include_hermes_md: bool = True):
         self.working_dir = Path(working_dir or os.getcwd()).resolve()
         self._loaded_dirs: Set[Path] = set()
         # Pre-mark the working dir as loaded (startup context handles it)
         self._loaded_dirs.add(self.working_dir)
+        # Build hint filename list — HERMES.md at front (highest priority)
+        # when enabled via config.
+        if include_hermes_md:
+            self._hint_filenames = _HINT_FILENAMES_HERMES + _HINT_FILENAMES_BASE
+        else:
+            self._hint_filenames = _HINT_FILENAMES_BASE
 
     def check_tool_call(
         self,
@@ -173,7 +189,7 @@ class SubdirectoryHintTracker:
         self._loaded_dirs.add(directory)
 
         found_hints = []
-        for filename in _HINT_FILENAMES:
+        for filename in self._hint_filenames:
             hint_path = directory / filename
             try:
                 if not hint_path.is_file():
@@ -191,17 +207,11 @@ class SubdirectoryHintTracker:
                         content[:_MAX_HINT_CHARS]
                         + f"\n\n[...truncated {filename}: {len(content):,} chars total]"
                     )
-                # Best-effort relative path for display
-                rel_path = str(hint_path)
-                try:
-                    rel_path = str(hint_path.relative_to(self.working_dir))
-                except ValueError:
-                    try:
-                        rel_path = str(hint_path.relative_to(Path.home()))
-                        rel_path = "~/" + rel_path
-                    except ValueError:
-                        pass  # keep absolute
-                found_hints.append((rel_path, content))
+                # Use absolute path for unambiguous identification
+                abs_path = str(hint_path)
+                # Append sibling note if other agent files exist in same dir
+                content += _check_sibling_context_files(directory, filename)
+                found_hints.append((abs_path, content))
                 # First match wins per directory (like startup loading)
                 break
             except Exception as exc:
@@ -211,9 +221,12 @@ class SubdirectoryHintTracker:
             return None
 
         sections = []
-        for rel_path, content in found_hints:
+        for abs_path, content in found_hints:
             sections.append(
-                f"[Subdirectory context discovered: {rel_path}]\n{content}"
+                "<system_notification>\n"
+                f"[Subdirectory context discovered: {abs_path}]\n"
+                f"{content}\n"
+                "</system_notification>"
             )
 
         logger.debug(
