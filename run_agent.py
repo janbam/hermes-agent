@@ -845,6 +845,7 @@ class AIAgent:
         tool_delay: float = 1.0,
         enabled_toolsets: List[str] = None,
         disabled_toolsets: List[str] = None,
+        disabled_tools: List[str] = None,
         save_trajectories: bool = False,
         verbose_logging: bool = False,
         detailed_output: bool = False,
@@ -908,6 +909,8 @@ class AIAgent:
             tool_delay (float): Delay between tool calls in seconds (default: 1.0)
             enabled_toolsets (List[str]): Only enable tools from these toolsets (optional)
             disabled_toolsets (List[str]): Disable tools from these toolsets (optional)
+            disabled_tools (List[str]): Disable specific individual tools by name (optional).
+                Applied after toolset resolution — finer-grained than disabled_toolsets.
             save_trajectories (bool): Whether to save conversation trajectories to JSONL files (default: False)
             verbose_logging (bool): Enable verbose logging for debugging — enables DEBUG-level
                 console logging output (default: False)
@@ -1148,6 +1151,7 @@ class AIAgent:
         # Store toolset filtering options
         self.enabled_toolsets = enabled_toolsets
         self.disabled_toolsets = disabled_toolsets
+        self.disabled_tools = disabled_tools
         
         # Model response configuration
         self.max_tokens = max_tokens  # None = use model default
@@ -1492,6 +1496,7 @@ class AIAgent:
         self.tools = get_tool_definitions(
             enabled_toolsets=enabled_toolsets,
             disabled_toolsets=disabled_toolsets,
+            disabled_tools=disabled_tools,
             quiet_mode=not self.verbose_logging,
         )
         
@@ -1508,6 +1513,8 @@ class AIAgent:
                     print(f"   ✅ Enabled toolsets: {', '.join(enabled_toolsets)}")
                 if disabled_toolsets:
                     print(f"   ❌ Disabled toolsets: {', '.join(disabled_toolsets)}")
+                if disabled_tools:
+                    print(f"   🚫 Disabled tools: {', '.join(disabled_tools)}")
         elif self.verbose_logging:
             print("🛠️  No tools loaded (all tools filtered out or unavailable)")
         

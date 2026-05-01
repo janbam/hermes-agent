@@ -1200,6 +1200,7 @@ def cmd_chat(args):
         "model": args.model,
         "provider": getattr(args, "provider", None),
         "toolsets": args.toolsets,
+        "disabled_tools": getattr(args, "disable_tools", None),
         "skills": getattr(args, "skills", None),
         "verbose": args.verbose,
         "quiet": getattr(args, "quiet", False),
@@ -7610,6 +7611,10 @@ For more help on a command:
     )
     chat_parser.add_argument(
         "-t", "--toolsets", help="Comma-separated toolsets to enable"
+    )
+    chat_parser.add_argument(
+        "--disable-tools",
+        help="Comma-separated individual tool names to blacklist (e.g. 'search_files,web_search')",
     )
     chat_parser.add_argument(
         "-s",

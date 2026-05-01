@@ -1860,6 +1860,7 @@ class HermesCLI:
         self,
         model: str = None,
         toolsets: List[str] = None,
+        disabled_tools: List[str] = None,
         provider: str = None,
         api_key: str = None,
         base_url: str = None,
@@ -2021,6 +2022,13 @@ class HermesCLI:
         
         # Parse and validate toolsets
         self.enabled_toolsets = toolsets
+
+        # Individual tool blacklist — CLI arg overrides config
+        if disabled_tools is not None:
+            self.disabled_tools = disabled_tools
+        else:
+            cfg_disabled = CLI_CONFIG.get("disabled_tools")
+            self.disabled_tools = list(cfg_disabled) if cfg_disabled else None
         if toolsets and "all" not in toolsets and "*" not in toolsets:
             # Validate each toolset — MCP server names are resolved via
             # live registry aliases (registered during discover_mcp_tools),
@@ -3443,6 +3451,7 @@ class HermesCLI:
                 credential_pool=runtime.get("credential_pool"),
                 max_iterations=self.max_turns,
                 enabled_toolsets=self.enabled_toolsets,
+                disabled_tools=self.disabled_tools,
                 verbose_logging=self.verbose,
                 detailed_output=self.detailed,
                 quiet_mode=not (self.verbose or self.detailed),
@@ -6479,6 +6488,7 @@ class HermesCLI:
                     acp_args=turn_route["runtime"].get("args"),
                     max_iterations=self.max_turns,
                     enabled_toolsets=self.enabled_toolsets,
+                    disabled_tools=self.disabled_tools,
                     quiet_mode=True,
                     verbose_logging=False,
                     session_id=task_id,
@@ -11079,6 +11089,7 @@ def main(
     q: str = None,
     image: str = None,
     toolsets: str = None,
+    disabled_tools: str = None,
     skills: str | list[str] | tuple[str, ...] = None,
     model: str = None,
     provider: str = None,
@@ -11187,10 +11198,24 @@ def main(
                     toolsets_list.extend([x.strip() for x in t.split(",")])
                 else:
                     toolsets_list.append(str(t))
+
     else:
         # Use the shared resolver so MCP servers are included at runtime
         from hermes_cli.tools_config import _get_platform_tools
         toolsets_list = sorted(_get_platform_tools(CLI_CONFIG, "cli"))
+
+    # Parse disabled_tools - individual tools to blacklist
+    disabled_tools_list = None
+    if disabled_tools:
+        if isinstance(disabled_tools, str):
+            disabled_tools_list = [t.strip() for t in disabled_tools.split(",")]
+        elif isinstance(disabled_tools, (list, tuple)):
+            disabled_tools_list = []
+            for t in disabled_tools:
+                if isinstance(t, str):
+                    disabled_tools_list.extend([x.strip() for x in t.split(",")])
+                else:
+                    disabled_tools_list.append(str(t))
     
     parsed_skills = _parse_skills_argument(skills)
 
@@ -11198,6 +11223,7 @@ def main(
     cli = HermesCLI(
         model=model,
         toolsets=toolsets_list,
+        disabled_tools=disabled_tools_list,
         provider=provider,
         api_key=api_key,
         base_url=base_url,
