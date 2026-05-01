@@ -224,8 +224,9 @@ Send any message while the agent is working to interrupt it. Key behaviors:
 
 ### Queue vs interrupt vs steer (busy-input mode)
 
-By default, messaging a busy agent interrupts it. Two other modes are available:
+By default, messaging a busy agent interrupts it. Other modes are available:
 
+- `interrupt` — follow-up messages interrupt the current task immediately (default).
 - `queue` — follow-up messages wait and run as the next turn after the current task finishes.
 - `steer` — follow-up messages are injected into the current run via `/steer`, arriving at the agent after the next tool call. No interrupt, no new turn. Falls back to `queue` behavior if the agent hasn't started yet.
 

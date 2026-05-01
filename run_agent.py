@@ -1108,6 +1108,14 @@ class AIAgent:
         self._pending_steer: Optional[str] = None
         self._pending_steer_lock = threading.Lock()
 
+        # /pause mechanism — stop cleanly at the next safe LLM boundary
+        # without cancelling the current tool or injecting text into context.
+        # This is a soft control-plane request, distinct from interrupt().
+        self._pause_after_tool_requested = False
+        self._pause_after_tool_lock = threading.Lock()
+        self._pause_resume_event = threading.Event()
+        self._pause_resume_event.set()
+
         # Concurrent-tool worker thread tracking.  `_execute_tool_calls_concurrent`
         # runs each tool on its own ThreadPoolExecutor worker — those worker
         # threads have tids distinct from `_execution_thread_id`, so
@@ -4076,14 +4084,16 @@ class AIAgent:
                     _set_interrupt(False, _wtid)
                 except Exception:
                     pass
-        # A hard interrupt supersedes any pending /steer — the steer was
-        # meant for the agent's next tool-call iteration, which will no
-        # longer happen. Drop it instead of surprising the user with a
-        # late injection on the post-interrupt turn.
+        # A hard interrupt supersedes any pending /steer or soft /pause.
+        # The steer was meant for the agent's next tool-call iteration, which
+        # will no longer happen. The pause was a non-cancelling boundary
+        # request; a hard interrupt is stronger and should not leak into the
+        # next turn.
         _steer_lock = getattr(self, "_pending_steer_lock", None)
         if _steer_lock is not None:
             with _steer_lock:
                 self._pending_steer = None
+        self._consume_pause_after_tool_request()
 
     def steer(self, text: str) -> bool:
         """
@@ -4119,6 +4129,90 @@ class AIAgent:
                 self._pending_steer = self._pending_steer + "\n" + cleaned
             else:
                 self._pending_steer = cleaned
+        return True
+
+    def pause_after_tool(self) -> bool:
+        """Request a soft pause before the next post-tool LLM API call.
+
+        Unlike interrupt(), this does not signal running tools to abort. The
+        agent finishes the current tool call/batch, persists the updated
+        transcript, then waits at the next safe boundary before sending another
+        LLM request. ``resume_after_pause()`` lifts the gate. Returns False
+        when a pause was already pending.
+        """
+        _event = getattr(self, "_pause_resume_event", None)
+        _lock = getattr(self, "_pause_after_tool_lock", None)
+        if _lock is None:
+            already = bool(getattr(self, "_pause_after_tool_requested", False))
+            self._pause_after_tool_requested = True
+            if _event is not None:
+                _event.clear()
+            return not already
+        with _lock:
+            already = bool(self._pause_after_tool_requested)
+            self._pause_after_tool_requested = True
+            if _event is not None:
+                _event.clear()
+            return not already
+
+    def resume_after_pause(self) -> bool:
+        """Lift a pending or active soft pause without sending user text."""
+        _event = getattr(self, "_pause_resume_event", None)
+        _lock = getattr(self, "_pause_after_tool_lock", None)
+        if _lock is None:
+            was_paused = bool(getattr(self, "_pause_after_tool_requested", False))
+            self._pause_after_tool_requested = False
+            if _event is not None:
+                _event.set()
+            return was_paused
+        with _lock:
+            was_paused = bool(self._pause_after_tool_requested)
+            self._pause_after_tool_requested = False
+            if _event is not None:
+                _event.set()
+            return was_paused
+
+    def _consume_pause_after_tool_request(self) -> bool:
+        """Return and clear any pending soft-pause request.
+
+        This is used for cancellation/cleanup paths. Normal pause handling uses
+        ``_wait_for_pause_resume_if_requested`` so the run can continue after
+        the user resumes it.
+        """
+        return self.resume_after_pause()
+
+    def _has_pause_after_tool_request(self) -> bool:
+        """Return True when a soft-pause request is pending or active."""
+        _lock = getattr(self, "_pause_after_tool_lock", None)
+        if _lock is None:
+            return bool(getattr(self, "_pause_after_tool_requested", False))
+        with _lock:
+            return bool(self._pause_after_tool_requested)
+
+    def _wait_for_pause_resume_if_requested(self) -> bool:
+        """Block at a safe boundary while a soft pause is active.
+
+        Returns True if the loop actually paused. A hard interrupt still wins:
+        it clears the pause flag and lets the outer loop handle interruption.
+        """
+        if not self._has_pause_after_tool_request():
+            return False
+
+        message = (
+            "⏸️ Paused before next model call. Press Ctrl+` to resume "
+            "without sending a message."
+        )
+        self._emit_status(message)
+
+        _event = getattr(self, "_pause_resume_event", None)
+        if _event is None:
+            # object.__new__ test stubs skip __init__; avoid deadlock.
+            self.resume_after_pause()
+            return True
+
+        while self._has_pause_after_tool_request() and not self._interrupt_requested:
+            _event.wait(timeout=0.25)
+
         return True
 
     def _drain_pending_steer(self) -> Optional[str]:
@@ -9636,6 +9730,8 @@ class AIAgent:
         api_call_count = 0
         final_response = None
         interrupted = False
+        paused = False
+        pause_boundary_open = False
         codex_ack_continuations = 0
         length_continue_retries = 0
         truncated_tool_call_retries = 0
@@ -9693,6 +9789,21 @@ class AIAgent:
                 if not self.quiet_mode:
                     self._safe_print("\n⚡ Breaking out of tool loop due to interrupt...")
                 break
+
+            # Soft /pause gate: once a tool batch has completed, never start
+            # another model request while the pause flag is raised. This is
+            # deliberately checked at the top of the loop before spending an
+            # API-call slot, and checked again immediately before the request
+            # below to catch commands that arrive during request preparation.
+            if pause_boundary_open:
+                paused = self._wait_for_pause_resume_if_requested() or paused
+                if self._interrupt_requested:
+                    continue
+                # A /steer typed while paused arrives after the normal post-tool
+                # steer drain has already run. Deliver it into the latest tool
+                # result before the next model call so resume preserves the
+                # same semantics as steering immediately after a tool batch.
+                self._apply_pending_steer_to_tool_results(messages, len(messages))
             
             api_call_count += 1
             self._api_call_count = api_call_count
@@ -9701,13 +9812,18 @@ class AIAgent:
             # Grace call: the budget is exhausted but we gave the model one
             # more chance.  Consume the grace flag so the loop exits after
             # this iteration regardless of outcome.
+            _iteration_consumed = False
+            _grace_call_consumed = False
             if self._budget_grace_call:
                 self._budget_grace_call = False
+                _grace_call_consumed = True
             elif not self.iteration_budget.consume():
                 _turn_exit_reason = "budget_exhausted"
                 if not self.quiet_mode:
                     self._safe_print(f"\n⚠️  Iteration budget exhausted ({self.iteration_budget.used}/{self.iteration_budget.max_total} iterations used)")
                 break
+            else:
+                _iteration_consumed = True
 
             # Fire step_callback for gateway hooks (agent:step event)
             if self.step_callback is not None:
@@ -9943,6 +10059,37 @@ class AIAgent:
             # Reset per-turn reasoning-delta tracker so the post-response
             # callback doesn't re-deliver reasoning that was already shown.
             self._reasoning_shown_via_delta = False
+
+            # Final soft-pause gate before any visible/API request side effect.
+            # This catches /pause commands that arrive while this iteration is
+            # preparing the request, without leaving a thinking spinner running
+            # during the pause.
+            if pause_boundary_open:
+                paused_this_gate = self._wait_for_pause_resume_if_requested()
+                paused = paused_this_gate or paused
+                if self._interrupt_requested:
+                    # No model request was sent; undo the accounting already
+                    # performed for this prepared-but-paused iteration.
+                    api_call_count = max(0, api_call_count - 1)
+                    self._api_call_count = api_call_count
+                    if _iteration_consumed:
+                        self.iteration_budget.refund()
+                    if _grace_call_consumed:
+                        self._budget_grace_call = True
+                    continue
+                if paused_this_gate:
+                    # A pause caught after request preparation can receive
+                    # /steer while waiting. The current api_messages snapshot
+                    # is stale, so do not send it. Refund this unsent iteration
+                    # and rebuild the request from messages; the top-of-loop
+                    # pre-API steer drain will inject any pending guidance.
+                    api_call_count = max(0, api_call_count - 1)
+                    self._api_call_count = api_call_count
+                    if _iteration_consumed:
+                        self.iteration_budget.refund()
+                    if _grace_call_consumed:
+                        self._budget_grace_call = True
+                    continue
             
             # Thinking spinner for quiet mode (animated during API call)
             thinking_spinner = None
@@ -12130,6 +12277,11 @@ class AIAgent:
                     # arrives.
                     self._stream_needs_break = True
 
+                    # A safe pause boundary is now available: all requested
+                    # tool calls for this assistant turn have completed, and
+                    # the next meaningful action would be another model call.
+                    pause_boundary_open = True
+
                     # Refund the iteration if the ONLY tool(s) called were
                     # execute_code (programmatic tool calling).  These are
                     # cheap RPC-style calls that shouldn't eat the budget.
@@ -12183,6 +12335,7 @@ class AIAgent:
                 
                 else:
                     # No tool calls - this is the final response
+                    pause_boundary_open = False
                     final_response = assistant_message.content or ""
                     
                     # Fix: unmute output when entering the no-tool-call branch
@@ -12644,8 +12797,9 @@ class AIAgent:
             "messages": messages,
             "api_calls": api_call_count,
             "completed": completed,
-            "partial": False,  # True only when stopped due to invalid tool calls
+            "partial": False,
             "interrupted": interrupted,
+            "paused": paused,
             "response_previewed": getattr(self, "_response_was_previewed", False),
             "model": self.model,
             "provider": self.provider,
@@ -12669,6 +12823,12 @@ class AIAgent:
         _leftover_steer = self._drain_pending_steer()
         if _leftover_steer:
             result["pending_steer"] = _leftover_steer
+        # If /pause was requested during an API call that ended naturally
+        # without tools, clear it here so it never leaks into the next turn.
+        # This must happen even if the run paused earlier and later resumed:
+        # a second late pause request after the final API call has no remaining
+        # post-tool boundary in this turn.
+        self._consume_pause_after_tool_request()
         self._response_was_previewed = False
         
         # Include interrupt message if one triggered the interrupt

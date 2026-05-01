@@ -40,6 +40,8 @@ class TestHandleBusyCommand(unittest.TestCase):
         printed = " ".join(str(c) for c in mock_cprint.call_args_list)
         self.assertIn("queue", printed)
         self.assertIn("interrupt", printed)
+        self.assertNotIn("/busy pause", printed)
+        self.assertNotIn("queue|steer|pause|interrupt", printed)
 
     def test_queue_argument_sets_queue_mode_and_saves(self):
         cli_mod = _import_cli()
@@ -94,6 +96,21 @@ class TestHandleBusyCommand(unittest.TestCase):
         # The usage line should also advertise the steer option
         self.assertIn("steer", printed)
 
+    def test_pause_argument_is_not_available_for_busy_mode(self):
+        cli_mod = _import_cli()
+        stub = self._make_cli("interrupt")
+        with (
+            patch.object(cli_mod, "_cprint") as mock_cprint,
+            patch.object(cli_mod, "save_config_value") as mock_save,
+        ):
+            cli_mod.HermesCLI._handle_busy_command(stub, "/busy pause")
+
+        self.assertEqual(stub.busy_input_mode, "interrupt")
+        mock_save.assert_not_called()
+        printed = " ".join(str(c) for c in mock_cprint.call_args_list)
+        self.assertIn("Unknown argument", printed)
+        self.assertNotIn("queue|steer|pause|interrupt", printed)
+
     def test_invalid_argument_prints_usage(self):
         cli_mod = _import_cli()
         stub = self._make_cli()
@@ -120,4 +137,5 @@ class TestBusyCommandRegistry(unittest.TestCase):
 
         busy = next(c for c in COMMAND_REGISTRY if c.name == "busy")
         assert busy.args_hint == "[queue|steer|interrupt|status]"
+        assert "pause" not in busy.subcommands
         assert busy.category == "Configuration"

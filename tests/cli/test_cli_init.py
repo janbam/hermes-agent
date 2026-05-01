@@ -109,6 +109,10 @@ class TestBusyInputMode:
         cli = _make_cli(config_overrides={"display": {"busy_input_mode": "bogus"}})
         assert cli.busy_input_mode == "interrupt"
 
+    def test_pause_busy_input_mode_falls_back_to_interrupt(self):
+        cli = _make_cli(config_overrides={"display": {"busy_input_mode": "pause"}})
+        assert cli.busy_input_mode == "interrupt"
+
     def test_queue_command_works_while_busy(self):
         """When agent is running, /queue should still put the prompt in _pending_input."""
         cli = _make_cli()
