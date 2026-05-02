@@ -279,6 +279,18 @@ def get_tool_definitions(
         tools_to_include -= disabled_set
         if not quiet_mode and removed:
             print(f"🚫 Disabled tools: {', '.join(sorted(removed))}")
+        if not quiet_mode:
+            unmatched = disabled_set - removed
+            if unmatched:
+                all_tools = set(registry.get_all_tool_names())
+                known = unmatched & all_tools
+                unknown = unmatched - all_tools
+                parts = []
+                if known:
+                    parts.append(f"not in enabled toolsets: {', '.join(sorted(known))}")
+                if unknown:
+                    parts.append(f"unknown: {', '.join(sorted(unknown))}")
+                print(f"⚠️  Unmatched disabled tool{'s' if len(unmatched) > 1 else ''} ({'; '.join(parts)})")
 
     # Ask the registry for schemas (only returns tools whose check_fn passes)
     filtered_tools = registry.get_definitions(tools_to_include, quiet=quiet_mode)

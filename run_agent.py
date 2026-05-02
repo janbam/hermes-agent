@@ -1513,8 +1513,6 @@ class AIAgent:
                     print(f"   ✅ Enabled toolsets: {', '.join(enabled_toolsets)}")
                 if disabled_toolsets:
                     print(f"   ❌ Disabled toolsets: {', '.join(disabled_toolsets)}")
-                if disabled_tools:
-                    print(f"   🚫 Disabled tools: {', '.join(disabled_tools)}")
         elif self.verbose_logging:
             print("🛠️  No tools loaded (all tools filtered out or unavailable)")
         
@@ -12931,6 +12929,7 @@ def main(
     max_turns: int = 10,
     enabled_toolsets: str = None,
     disabled_toolsets: str = None,
+    disabled_tools: str = None,
     list_tools: bool = False,
     save_trajectories: bool = False,
     save_sample: bool = False,
@@ -12950,6 +12949,9 @@ def main(
                               toolsets (e.g., "research", "development", "safe").
                               Multiple toolsets can be combined: "web,vision"
         disabled_toolsets (str): Comma-separated list of toolsets to disable (e.g., "terminal")
+        disabled_tools (str): Comma-separated list of individual tool names to blacklist
+                              (e.g., "search_files,web_search"). Finer-grained than toolsets;
+                              applied after toolset resolution.
         list_tools (bool): Just list available tools and exit
         save_trajectories (bool): Save conversation trajectories to JSONL files (appends to trajectory_samples.jsonl). Defaults to False.
         save_sample (bool): Save a single trajectory sample to a UUID-named JSONL file for inspection. Defaults to False.
@@ -13041,6 +13043,9 @@ def main(
         print("  # Disable toolsets")
         print("  python run_agent.py --disabled_toolsets=terminal --query='no command execution'")
         print("  ")
+        print("  # Blacklist specific tools")
+        print("  python run_agent.py --disabled_tools=search_files,web_search --query='use other tools'")
+        print("  ")
         print("  # Run with trajectory saving enabled")
         print("  python run_agent.py --save_trajectories --query='your question here'")
         return
@@ -13057,6 +13062,11 @@ def main(
         disabled_toolsets_list = [t.strip() for t in disabled_toolsets.split(",")]
         print(f"🚫 Disabled toolsets: {disabled_toolsets_list}")
     
+    disabled_tools_list = None
+    if disabled_tools:
+        disabled_tools_list = [t.strip() for t in disabled_tools.split(",")]
+        print(f"🚫 Disabled tools: {disabled_tools_list}")
+    
     if save_trajectories:
         print("💾 Trajectory saving: ENABLED")
         print("   - Successful conversations → trajectory_samples.jsonl")
@@ -13071,6 +13081,7 @@ def main(
             max_iterations=max_turns,
             enabled_toolsets=enabled_toolsets_list,
             disabled_toolsets=disabled_toolsets_list,
+            disabled_tools=disabled_tools_list,
             save_trajectories=save_trajectories,
             verbose_logging=verbose,
             log_prefix_chars=log_prefix_chars

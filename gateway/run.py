@@ -6833,7 +6833,7 @@ class GatewayRunner:
 
             from hermes_cli.tools_config import _get_platform_tools
             enabled_toolsets = sorted(_get_platform_tools(user_config, platform_key))
-            disabled_tools = list(user_config.get("disabled_tools") or [])
+            disabled_tools = user_config.get("disabled_tools") or None
 
             pr = self._provider_routing
             max_iterations = int(os.getenv("HERMES_MAX_ITERATIONS", "90"))
@@ -9524,7 +9524,7 @@ class GatewayRunner:
 
         from hermes_cli.tools_config import _get_platform_tools
         enabled_toolsets = sorted(_get_platform_tools(user_config, platform_key))
-        disabled_tools = list(user_config.get("disabled_tools") or [])
+        disabled_tools = user_config.get("disabled_tools") or None
 
         display_config = user_config.get("display", {})
         if not isinstance(display_config, dict):
