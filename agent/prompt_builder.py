@@ -47,28 +47,136 @@ _CONTEXT_THREAT_PATTERNS = [
 ]
 
 _CONTEXT_INVISIBLE_CHARS = {
-    '\u200b', '\u200c', '\u200d', '\u2060', '\ufeff',
-    '\u202a', '\u202b', '\u202c', '\u202d', '\u202e',
+    # Characters outside the typical ASCII/emoji distribution.
+    # These are NOT blocked — a gentle notification is prepended instead.
+    # The walled-garden trust model (SOUL.md written by the user or their
+    # agent, not by random internet strangers) makes character-level blocking
+    # unnecessary.  The LLM can see and judge context for itself.
+    '\u200b',  # ZERO WIDTH SPACE
+    '\u2060',  # WORD JOINER
+    '\ufeff',  # BOM / ZERO WIDTH NO-BREAK SPACE
+    '\u202a',  # LEFT-TO-RIGHT EMBEDDING
+    '\u202b',  # RIGHT-TO-LEFT EMBEDDING
+    '\u202c',  # POP DIRECTIONAL FORMATTING
+    '\u202d',  # LEFT-TO-RIGHT OVERRIDE
+    '\u202e',  # RIGHT-TO-LEFT OVERRIDE
+}
+
+# ZWJ / ZWNJ are legitimate in emoji sequences (🤸‍♀️, 👨‍👩‍👧‍👦, etc.) and
+# some scripts — but unusual when adjacent to ASCII printable characters
+# or whitespace (the pattern: "ig\u200dnore rules").
+_CONTEXT_EMOJI_ZW_CHARS = {
+    '\u200d',  # ZERO WIDTH JOINER
+    '\u200c',  # ZERO WIDTH NON-JOINER
+}
+
+# Human-readable names for notification messages
+_UNICODE_CHAR_NAMES = {
+    '\u200b': 'Zero Width Space',
+    '\u200c': 'Zero Width Non-Joiner',
+    '\u200d': 'Zero Width Joiner',
+    '\u2060': 'Word Joiner',
+    '\ufeff': 'Zero Width No-Break Space / BOM',
+    '\u202a': 'Left-to-Right Embedding',
+    '\u202b': 'Right-to-Left Embedding',
+    '\u202c': 'Pop Directional Formatting',
+    '\u202d': 'Left-to-Right Override',
+    '\u202e': 'Right-to-Left Override',
 }
 
 
-def _scan_context_content(content: str, filename: str) -> str:
-    """Scan context file content for injection. Returns sanitized content."""
-    findings = []
+def _is_ascii_or_ws(ch: str) -> bool:
+    """Return True if *ch* is in the ASCII range (U+0000–U+007E).
 
-    # Check invisible unicode
+    This includes printable ASCII, control characters, and whitespace
+    (tab, newline, carriage return, space).  Any ZWJ/ZWNJ adjacent to one
+    of these is *not* part of a legitimate emoji sequence.
+    """
+    return ord(ch) <= 0x7E
+
+
+def _check_unusual_unicode(content: str) -> list[str]:
+    """Find unusual unicode characters in *content*.
+
+    Returns a list of human-readable descriptions like
+    ``\"U+200D (Zero Width Joiner)\"`` for characters that are outside the
+    ordinary ASCII/emoji distribution.  ZWJ/ZWNJ are only flagged when
+    adjacent to ASCII printable characters or whitespace (suspicious
+    context); between emoji codepoints they are considered normal.
+
+    BOM at position 0 is ignored (harmless UTF-8 marker).
+    """
+    notes = []
+
     for char in _CONTEXT_INVISIBLE_CHARS:
         if char in content:
-            findings.append(f"invisible unicode U+{ord(char):04X}")
+            # BOM at position 0 is a harmless UTF-8 marker — only flag
+            # if the character appears elsewhere in the file too.
+            if char == '\ufeff' and content.find(char, 1) == -1:
+                continue
+            name = _UNICODE_CHAR_NAMES.get(char, '')
+            notes.append(f"U+{ord(char):04X} ({name})" if name else f"U+{ord(char):04X}")
 
-    # Check threat patterns
+    # ZWJ/ZWNJ: only flag when adjacent to ASCII/whitespace
+    for char in _CONTEXT_EMOJI_ZW_CHARS:
+        idx = 0
+        while True:
+            idx = content.find(char, idx)
+            if idx == -1:
+                break
+            suspicious = False
+            if idx > 0 and _is_ascii_or_ws(content[idx - 1]):
+                suspicious = True
+            elif idx < len(content) - 1 and _is_ascii_or_ws(content[idx + 1]):
+                suspicious = True
+            if suspicious:
+                name = _UNICODE_CHAR_NAMES.get(char, '')
+                notes.append(
+                    f"U+{ord(char):04X} ({name}, not in emoji sequence)"
+                    if name else f"U+{ord(char):04X} (not in emoji sequence)"
+                )
+                break
+            idx += 1
+
+    return notes
+
+
+def _scan_context_content(content: str, filename: str) -> str:
+    """Scan context file content. Returns content, possibly with a notice.
+
+    Unusual unicode characters get a gentle informational note prepended —
+    they do NOT block the content.  The LLM sees everything and can judge
+    context for itself.  Explicit threat patterns (\"ignore previous
+    instructions\", etc.) are still blocked — those are unambiguous attacks.
+    """
+    findings = []
+
+    # Check threat patterns — these are actual attacks, block them
     for pattern, pid in _CONTEXT_THREAT_PATTERNS:
         if re.search(pattern, content, re.IGNORECASE):
             findings.append(pid)
 
     if findings:
-        logger.warning("Context file %s blocked: %s", filename, ", ".join(findings))
-        return f"[BLOCKED: {filename} contained potential prompt injection ({', '.join(findings)}). Content not loaded.]"
+        logger.warning("Context file %s blocked (threat patterns): %s",
+                       filename, ", ".join(findings))
+        return (
+            f"[BLOCKED: {filename} contained potential prompt injection"
+            f" ({', '.join(findings)}). Content not loaded.]"
+        )
+
+    # Unusual unicode — gentle notification, content passes through unmodified
+    unicode_notes = _check_unusual_unicode(content)
+    if unicode_notes:
+        logger.info("Context file %s contains unusual unicode: %s",
+                    filename, ", ".join(unicode_notes))
+        note = (
+            f"ℹ️  {filename} contains characters outside the typical"
+            f" ASCII/emoji distribution: {', '.join(unicode_notes)}."
+            f"  These may be intentional formatting (emoji sequences,"
+            f" mixed-direction text) or could warrant review."
+            f"  Content follows unmodified.\n\n"
+        )
+        return note + content
 
     return content
 
